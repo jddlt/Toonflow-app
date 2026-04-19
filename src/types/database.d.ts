@@ -1,4 +1,4 @@
-// @db-hash 5364c2db0bf42b520761b813ce040489
+// @db-hash 7bfcea81300e8bb3ea80f11f2933f09c
 //该文件由脚本自动生成，请勿手动修改
 
 export interface memories {
@@ -23,7 +23,6 @@ export interface o_agentDeploy {
   'modelName'?: string | null;
   'name'?: string | null;
   'temperature'?: number | null;
-  'topP'?: number | null;
   'type'?: string | null;
   'vendorId'?: string | null;
 }
@@ -109,17 +108,6 @@ export interface o_novel {
   'id'?: number;
   'projectId'?: number | null;
   'reel'?: string | null;
-}
-export interface o_outline {
-  'data'?: string | null;
-  'episode'?: number | null;
-  'id'?: number;
-  'projectId'?: number | null;
-}
-export interface o_outlineNovel {
-  'id'?: number;
-  'novelId'?: number | null;
-  'outlineId'?: number | null;
 }
 export interface o_project {
   'artStyle'?: string | null;
@@ -252,8 +240,6 @@ export interface DB {
   "o_imageFlow": o_imageFlow;
   "o_modelPrompt": o_modelPrompt;
   "o_novel": o_novel;
-  "o_outline": o_outline;
-  "o_outlineNovel": o_outlineNovel;
   "o_project": o_project;
   "o_prompt": o_prompt;
   "o_script": o_script;

@@ -2,6 +2,7 @@ import express from "express";
 import { success, error } from "@/lib/responseFormat";
 import { validateFields } from "@/middleware/middleware";
 import u from "@/utils";
+import { appendVendorModel, serializeStoredVendorModels } from "@/utils/vendorModelStore";
 import { z } from "zod";
 const router = express.Router();
 
@@ -45,17 +46,17 @@ export default router.post(
   async (req, res) => {
     const { id, model } = req.body;
 
-    const models = await u.db("o_vendorConfig").where("id", id).first("models");
-    if (models?.models) {
-      const existingModels = JSON.parse(models.models);
-      existingModels.push(model);
-      await u
-        .db("o_vendorConfig")
-        .where("id", id)
-        .update({
-          models: JSON.stringify(existingModels),
-        });
-    }
+    const vendorConfig = await u.db("o_vendorConfig").where("id", id).first("models");
+    if (!vendorConfig) return res.status(404).send(error("未找到该供应商配置"));
+
+    const nextModels = appendVendorModel(vendorConfig.models, model);
+    await u
+      .db("o_vendorConfig")
+      .where("id", id)
+      .update({
+        models: serializeStoredVendorModels(nextModels),
+      });
+
     res.status(200).send(success("更新成功"));
   },
 );

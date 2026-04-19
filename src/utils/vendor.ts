@@ -2,6 +2,7 @@ import { transform } from "sucrase";
 import fs from "fs";
 import path from "path";
 import u from "@/utils";
+import { mergeVendorModels } from "@/utils/vendorModelStore";
 
 export function writeCode(id: string | number, tsCode: string) {
   const rootDir = u.getPath("vendor")
@@ -21,17 +22,10 @@ export function getCode(id: string): string {
 
 export async function getModelList(id: string): Promise<Array<any>> {
   const models = await u.db("o_vendorConfig").where("id", id).select("models").first();
-  if (!models || !models.models) return [];
   const code = getCode(id);
   const jsCode = transform(code, { transforms: ["typescript"] }).code;
   const vendorData = u.vm(jsCode);
-  if(!vendorData || !vendorData.vendor || !vendorData.vendor.models) return [];
-  const combined = [...JSON.parse(JSON.stringify(vendorData.vendor.models)), ...JSON.parse(models?.models ?? "[]")];
-  const map = new Map<string, any>();
-  for (const m of combined) {
-    map.set(m.modelName, m);
-  }
-  return [...map.values()];
+  return mergeVendorModels(vendorData.vendor.models ?? [], models?.models ?? "[]");
 }
 
 export function getVendor(id: string) {

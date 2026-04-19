@@ -2,6 +2,17 @@ import esbuild from "esbuild";
 import fs from "fs";
 import path from "path";
 
+function syncVendorSnapshot() {
+  const vendorDir = path.join("data", "vendor");
+  const outputFile = path.join("src", "lib", "vendor.json");
+  const files = fs.readdirSync(vendorDir).filter((file) => file.endsWith(".ts"));
+  const result: Record<string, string> = {};
+  for (const file of files) {
+    result[file] = fs.readFileSync(path.join(vendorDir, file), "utf-8");
+  }
+  fs.writeFileSync(outputFile, JSON.stringify(result, null, 2), "utf-8");
+}
+
 // 打包默认使用 prod 环境变量
 if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = "prod";
@@ -71,6 +82,7 @@ const mainBuildConfig: esbuild.BuildOptions = {
 (async () => {
   try {
     console.log("🔨 开始构建...\n");
+    syncVendorSnapshot();
 
     // 并行构建
     await Promise.all([esbuild.build(appBuildConfig), esbuild.build(mainBuildConfig)]);

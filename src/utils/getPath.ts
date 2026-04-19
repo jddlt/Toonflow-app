@@ -1,15 +1,19 @@
 import path from "path";
 import isPathInside from "is-path-inside";
 
-export default (fileName?: string[] | string) => {
-  let basePath: string;
+function getBasePath() {
   if (typeof process.versions?.electron !== "undefined") {
     const { app } = require("electron");
-    const userDataDir: string = app.getPath("userData");
-    basePath = path.join(userDataDir, "data");
-  } else {
-    basePath = path.join(process.cwd(), "data");
+    if (app.isPackaged) {
+      const userDataDir: string = app.getPath("userData");
+      return path.join(userDataDir, "data");
+    }
   }
+  return path.join(process.cwd(), "data");
+}
+
+export default (fileName?: string[] | string) => {
+  const basePath = getBasePath();
   if (fileName) {
     let dbPath: string;
     if (Array.isArray(fileName)) {
@@ -26,10 +30,5 @@ export default (fileName?: string[] | string) => {
 };
 
 export function isEletron() {
-  if (typeof process.versions?.electron !== "undefined") {
-    const { app } = require("electron");
-    return true;
-  } else {
-    return false;
-  }
+  return typeof process.versions?.electron !== "undefined";
 }

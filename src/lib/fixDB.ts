@@ -5,6 +5,7 @@ import { Knex } from "knex";
 import db from "@/utils/db";
 import { transform } from "sucrase";
 import rawVendorData from "./vendor.json";
+import { parseStoredVendorModels, serializeStoredVendorModels } from "@/utils/vendorModelStore";
 
 const vendorData = rawVendorData as Record<string, string>;
 
@@ -143,6 +144,36 @@ export default async (knex: Knex): Promise<void> => {
   const minimaxVer = await u.vendor.getVendor("minimax").version;
   if (Number(minimaxVer) < 2.1) {
     u.vendor.writeCode("minimax", vendorData["minimax.ts"]);
+  }
+  const uniMediaVer = await u.vendor.getVendor("uni-media").version;
+  if (Number(uniMediaVer) < 2.4) {
+    u.vendor.writeCode("uni-media", vendorData["uni-media.ts"]);
+    const uniMediaConfig = await u.db("o_vendorConfig").where("id", "uni-media").first("models");
+    const staleBuiltInModels = new Set([
+      "gemini-3.0-pro-image",
+      "gemini-3.1-flash-image",
+      "grok-image",
+      "grok-image-fast",
+      "grok-image-pro",
+      "imagen-4.0",
+      "qwen-image",
+      "qwen-image-edit",
+      "z-image-turbo",
+      "grok-video",
+      "veo-3.1",
+      "veo-3.1-fast",
+      "veo-3.1-lite",
+      "veo-3.1-r2v-fast",
+    ]);
+    const nextModels = parseStoredVendorModels(uniMediaConfig?.models).filter((model) => {
+      if (model.deleted) return true;
+      if (!staleBuiltInModels.has(model.modelName)) return true;
+      return ["supportedResolutions", "allowedInputTypes", "referenceImageLimits", "supportedDurations"].some((key) => key in model);
+    });
+    await u
+      .db("o_vendorConfig")
+      .where("id", "uni-media")
+      .update({ models: serializeStoredVendorModels(nextModels) });
   }
 };
 

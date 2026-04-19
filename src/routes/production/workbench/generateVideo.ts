@@ -17,6 +17,21 @@ interface UploadItem {
   prompt?: string;
 }
 
+const normalizeDurationForModel = (duration: number, model: any): number => {
+  const supportedDurations: number[] = [...new Set<number>((model?.durationResolutionMap ?? []).flatMap((item: any) => item.duration ?? []))]
+    .filter((item): item is number => typeof item === "number" && Number.isFinite(item))
+    .sort((a, b) => a - b);
+
+  if (!supportedDurations.length || supportedDurations.includes(duration)) return duration;
+
+  const nextHigher = supportedDurations.find((item) => item > duration);
+  if (typeof nextHigher === "number") return nextHigher;
+
+  return supportedDurations.reduce((closest, item) => {
+    return Math.abs(item - duration) < Math.abs(closest - duration) ? item : closest;
+  }, supportedDurations[0]!);
+};
+
 export default router.post(
   "/",
   validateFields({
@@ -45,6 +60,10 @@ export default router.post(
         modeData = JSON.parse(mode);
       } catch (e) { }
     }
+    const [vendorId, modelName] = model.split(/:(.+)/);
+    const modelList = await u.vendor.getModelList(vendorId);
+    const currentModel = modelList.find((item: any) => item.modelName === modelName);
+    const normalizedDuration = normalizeDurationForModel(duration, currentModel);
     //获取生成视频比例
     const ratio = await u.db("o_project").select("videoRatio").where("id", projectId).first();
     const videoPath = `/${projectId}/video/${uuidv4()}.mp4`; //视频保存路径
@@ -97,7 +116,7 @@ export default router.post(
             prompt,
             referenceList: base64.filter((item) => item !== null).map((item) => ({ type: "image" as const, base64: item! })),
             mode: modeData.length > 0 ? modeData : mode,
-            duration,
+            duration: normalizedDuration,
             aspectRatio: (ratio?.videoRatio as "16:9" | "9:16") || "16:9",
             resolution,
             audio,

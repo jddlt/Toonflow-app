@@ -81,12 +81,6 @@ export default router.post(
         const errorMsg = result.error.issues.map((e) => `${e.path.join(".")}: ${e.message}`).join("; ");
         return res.status(400).send(error(`vendor配置校验失败: ${errorMsg}`));
       }
-      await u
-        .db("o_vendorConfig")
-        .where("id", id)
-        .update({
-          models: JSON.stringify(vendor.models ?? []),
-        });
       u.vendor.writeCode(id, tsCode);
 
       res.status(200).send(success(result.data));

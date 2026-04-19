@@ -6,7 +6,36 @@ import { z } from "zod";
 import { tool } from "ai";
 const router = express.Router();
 
-// 检查语言模型
+const sampleReferenceImage = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6p5wAAAABJRU5ErkJggg==";
+
+const createImageReferences = (count: number) =>
+  Array.from({ length: count }, () => ({
+    type: "image" as const,
+    sourceType: "base64" as const,
+    base64: sampleReferenceImage,
+  }));
+
+const getRequiredImageCount = (selectedModel: any) => {
+  const minByLimit = Number(selectedModel?.referenceImageLimits?.min ?? 0);
+  const modes = Array.isArray(selectedModel?.mode) ? selectedModel.mode : [];
+  if (modes.includes("startEndRequired")) return Math.max(2, minByLimit);
+  if (modes.includes("endFrameOptional") || modes.includes("startFrameOptional")) return Math.max(1, minByLimit);
+  if (modes.some((mode: unknown) => Array.isArray(mode))) return Math.max(1, minByLimit);
+  if (modes.includes("singleImage") || !modes.includes("text")) return Math.max(1, minByLimit);
+  return minByLimit;
+};
+
+const getDefaultVideoMode = (selectedModel: any) => {
+  const modes = Array.isArray(selectedModel?.mode) ? selectedModel.mode : [];
+  if (modes.includes("text") && getRequiredImageCount(selectedModel) === 0) return "text";
+  if (modes.includes("singleImage") && getRequiredImageCount(selectedModel) <= 1) return "singleImage";
+  if (modes.includes("startEndRequired")) return "startEndRequired";
+  if (modes.includes("endFrameOptional")) return "endFrameOptional";
+  if (modes.includes("startFrameOptional")) return "startFrameOptional";
+  const referenceMode = modes.find((mode: unknown) => Array.isArray(mode));
+  return referenceMode ?? (modes[0] ?? "text");
+};
+
 export default router.post(
   "/",
   validateFields({
@@ -24,9 +53,9 @@ export default router.post(
           fnName: "imageRequest",
           modelData: {
             prompt:
-              "一张16:9比例的图片，完美等分为2x2四宫格布局，各区域无缝衔接：\n左上宫格：一只可爱的猫，毛发蓬松，眼睛明亮，姿态俏皮\n右上宫格：一只友善的狗，金毛犬，表情愉悦，摇着尾巴\n左下宫格：一头健壮的牛，田园背景，目光温和，皮毛光泽\n右下宫格：一匹骏马，姿态优雅，鬃毛飘逸，肌肉健美\n风格要求：四个宫格风格统一，色彩鲜艳饱和，高清画质，细节清晰锐利，专业插画风格，线条干净，统一的左上方光源，柔和阴影，和谐配色，卡通/半写实风格，宫格间用白色或浅灰细线分隔", //图片提示词
-            referenceList: [], //输入的图片提示词
-            size: "1K", // 图片尺寸
+              "一张16:9比例的图片，完美等分为2x2四宫格布局，各区域无缝衔接：\n左上宫格：一只可爱的猫，毛发蓬松，眼睛明亮，姿态俏皮\n右上宫格：一只友善的狗，金毛犬，表情愉悦，摇着尾巴\n左下宫格：一头健壮的牛，田园背景，目光温和，皮毛光泽\n右下宫格：一匹骏马，姿态优雅，鬃毛飘逸，肌肉健美\n风格要求：四个宫格风格统一，色彩鲜艳饱和，高清画质，细节清晰锐利，专业插画风格，线条干净，统一的左上方光源，柔和阴影，和谐配色，卡通/半写实风格，宫格间用白色或浅灰细线分隔",
+            referenceList: [],
+            size: "1K",
             aspectRatio: "16:9",
           },
         },
@@ -40,6 +69,10 @@ export default router.post(
       const modelList = await u.vendor.getModelList(vendorConfigData.id!);
 
       const selectedModel = modelList.find((i: any) => i.modelName == modelName);
+      const imageReferenceList = createImageReferences(getRequiredImageCount(selectedModel));
+      if (type == "image") {
+        requestFn["image"].modelData.referenceList = imageReferenceList;
+      }
       if (type == "video") {
         requestFn["video"].modelData = {
           model: modelName,
@@ -48,9 +81,9 @@ export default router.post(
           aspectRatio: "16:9",
           prompt:
             "A shirtless middle-aged man with a horse head is standing in a supermarket, carefully comparing two identical bottles of shampoo for 3 seconds, then suddenly bursts into tears, drops to his knees dramatically, a flock of pigeons explodes out of nowhere from behind him, the supermarket lights flicker, an old grandma nearby continues shopping completely unbothered, the horse head man instantly stops crying, puts both shampoo bottles back, and moonwalks away disappearing into the vegetable section. Security camera footage style, slightly grainy, 5 seconds.",
-          referenceList: [],
+          referenceList: imageReferenceList,
           audio: false,
-          mode: "text",
+          mode: getDefaultVideoMode(selectedModel),
         };
       }
       const reqConfig = requestFn[type as "text" | "video" | "image"];
