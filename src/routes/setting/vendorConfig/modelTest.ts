@@ -15,24 +15,39 @@ const createImageReferences = (count: number) =>
     base64: sampleReferenceImage,
   }));
 
-const getRequiredImageCount = (selectedModel: any) => {
+const getRequiredImageCount = (selectedModel: any, activeMode?: any) => {
   const minByLimit = Number(selectedModel?.referenceImageLimits?.min ?? 0);
+  const multiReferenceMinCount = Number(selectedModel?.multiReferenceMinCount ?? 1);
+  const mode = activeMode;
   const modes = Array.isArray(selectedModel?.mode) ? selectedModel.mode : [];
+  if (mode === "startEndRequired") return 2;
+  if (mode === "endFrameOptional" || mode === "startFrameOptional") return 1;
+  if (mode === "singleImage") return 1;
+  if (Array.isArray(mode)) return Math.max(multiReferenceMinCount, minByLimit);
+  if (mode === "text") return 0;
   if (modes.includes("startEndRequired")) return Math.max(2, minByLimit);
   if (modes.includes("endFrameOptional") || modes.includes("startFrameOptional")) return Math.max(1, minByLimit);
-  if (modes.some((mode: unknown) => Array.isArray(mode))) return Math.max(1, minByLimit);
+  if (modes.some((item: unknown) => Array.isArray(item))) return Math.max(multiReferenceMinCount, minByLimit);
   if (modes.includes("singleImage") || !modes.includes("text")) return Math.max(1, minByLimit);
   return minByLimit;
 };
 
+const getDefaultImageMode = (selectedModel: any) => {
+  const modes = Array.isArray(selectedModel?.mode) ? selectedModel.mode : [];
+  if (modes.includes("text")) return "text";
+  if (modes.includes("singleImage")) return "singleImage";
+  if (modes.includes("multiReference")) return "multiReference";
+  return modes[0] ?? "text";
+};
+
 const getDefaultVideoMode = (selectedModel: any) => {
   const modes = Array.isArray(selectedModel?.mode) ? selectedModel.mode : [];
-  if (modes.includes("text") && getRequiredImageCount(selectedModel) === 0) return "text";
-  if (modes.includes("singleImage") && getRequiredImageCount(selectedModel) <= 1) return "singleImage";
+  if (modes.includes("text") && getRequiredImageCount(selectedModel, "text") === 0) return "text";
+  if (modes.includes("singleImage") && getRequiredImageCount(selectedModel, "singleImage") <= 1) return "singleImage";
   if (modes.includes("startEndRequired")) return "startEndRequired";
   if (modes.includes("endFrameOptional")) return "endFrameOptional";
   if (modes.includes("startFrameOptional")) return "startFrameOptional";
-  const referenceMode = modes.find((mode: unknown) => Array.isArray(mode));
+  const referenceMode = modes.find((item: unknown) => Array.isArray(item));
   return referenceMode ?? (modes[0] ?? "text");
 };
 
@@ -42,9 +57,10 @@ export default router.post(
     modelName: z.string(),
     type: z.enum(["text", "video", "image"]),
     id: z.string(),
+    mode: z.any().optional(),
   }),
   async (req, res) => {
-    const { modelName, type, id } = req.body;
+    const { modelName, type, id, mode } = req.body;
 
     try {
       const requestFn: Record<string, { fnName: string; modelData?: any }> = {
@@ -57,6 +73,7 @@ export default router.post(
             referenceList: [],
             size: "1K",
             aspectRatio: "16:9",
+            mode: "text",
           },
         },
         video: { fnName: "videoRequest", modelData: {} },
@@ -67,11 +84,14 @@ export default router.post(
       if (!vendorConfigData.models) return res.status(500).send(error("未找到模型列表"));
 
       const modelList = await u.vendor.getModelList(vendorConfigData.id!);
-
       const selectedModel = modelList.find((i: any) => i.modelName == modelName);
-      const imageReferenceList = createImageReferences(getRequiredImageCount(selectedModel));
+      if (!selectedModel) return res.status(500).send(error("未找到该模型"));
+
+      const activeMode = mode ?? (type === "image" ? getDefaultImageMode(selectedModel) : getDefaultVideoMode(selectedModel));
+      const imageReferenceList = createImageReferences(getRequiredImageCount(selectedModel, activeMode));
       if (type == "image") {
         requestFn["image"].modelData.referenceList = imageReferenceList;
+        requestFn["image"].modelData.mode = activeMode;
       }
       if (type == "video") {
         requestFn["video"].modelData = {
@@ -83,7 +103,7 @@ export default router.post(
             "A shirtless middle-aged man with a horse head is standing in a supermarket, carefully comparing two identical bottles of shampoo for 3 seconds, then suddenly bursts into tears, drops to his knees dramatically, a flock of pigeons explodes out of nowhere from behind him, the supermarket lights flicker, an old grandma nearby continues shopping completely unbothered, the horse head man instantly stops crying, puts both shampoo bottles back, and moonwalks away disappearing into the vegetable section. Security camera footage style, slightly grainy, 5 seconds.",
           referenceList: imageReferenceList,
           audio: false,
-          mode: getDefaultVideoMode(selectedModel),
+          mode: activeMode,
         };
       }
       const reqConfig = requestFn[type as "text" | "video" | "image"];

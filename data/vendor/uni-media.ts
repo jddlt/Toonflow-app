@@ -1,6 +1,6 @@
 /**
  * uni-media 供应商适配
- * @version 2.4
+ * @version 2.5
  */
 
 // ============================================================
@@ -38,6 +38,7 @@ interface VideoModel {
   associationSkills?: string;
   audio: "optional" | false | true;
   durationResolutionMap: { duration: number[]; resolution: string[] }[];
+  multiReferenceMinCount?: number;
 }
 
 interface TTSModel {
@@ -69,6 +70,7 @@ interface ImageConfig {
   referenceList?: Extract<ReferenceList, { type: "image" }>[];
   size: "1K" | "2K" | "4K";
   aspectRatio: `${number}:${number}`;
+  mode?: "text" | "singleImage" | "multiReference";
 }
 
 interface VideoConfig {
@@ -158,6 +160,7 @@ const videoModel = (
   supportedDurations: number[],
   referenceImageLimits: { min: number; max: number },
   allowedInputTypes: string[],
+  multiReferenceMinCount?: number,
 ) => ({
   name,
   modelName,
@@ -169,11 +172,12 @@ const videoModel = (
   supportedDurations,
   referenceImageLimits,
   allowedInputTypes,
+  ...(typeof multiReferenceMinCount === "number" ? { multiReferenceMinCount } : {}),
 });
 
 const vendor: VendorConfig = {
   id: "uni-media",
-  version: "2.4",
+  version: "2.5",
   author: "Toonflow",
   name: "uni-media",
   description: "## uni-media\n\n统一多媒体网关适配，当前支持图片生成、图片编辑、视频生成。该供应商不是通用文本模型供应商，因此不会提供文本模型。",
@@ -200,7 +204,7 @@ const vendor: VendorConfig = {
       "gemini-3.1-flash-image",
       ["text", "singleImage", "multiReference"],
       ["1024x576", "576x1024", "1024x1024", "1024x768", "768x1024", "2048x1152", "1152x2048", "2048x2048", "2048x1536", "1536x2048", "4096x2304", "2304x4096", "4096x4096", "4096x3072", "3072x4096"],
-      { min: 0, max: 3 },
+      { min: 0, max: 6 },
       ["text", "image_url"],
       true,
     ),
@@ -270,11 +274,12 @@ const vendor: VendorConfig = {
     videoModel(
       "Grok Video",
       "grok-video",
-      ["text", "singleImage"],
+      ["text", "singleImage", "startEndRequired", ["imageReference:8"]],
       ["1280x720", "720x1280", "720x720", "1080x720", "720x1080"],
       [6, 10, 12, 16, 20],
-      { min: 0, max: 1 },
+      { min: 0, max: 8 },
       ["text", "image_url"],
+      3,
     ),
     videoModel(
       "Veo 3.1",
@@ -383,8 +388,28 @@ const allowsInputType = (model: any, inputType: string) => {
   return false;
 };
 
-const getReferenceLimits = (model: any) => {
+const getReferenceLimits = (model: any, activeMode?: VideoConfig["mode"] | ImageConfig["referenceList"]) => {
   const metaLimits = getModelMeta(model).referenceImageLimits;
+  const modeSelection = Array.isArray(activeMode) || typeof activeMode === "string" ? activeMode : undefined;
+  const isVideoModeSelection = Array.isArray(modeSelection) || typeof modeSelection === "string";
+
+  if (isVideoModeSelection) {
+    if (modeSelection === "startEndRequired") return { min: 2, max: 2 };
+    if (modeSelection === "endFrameOptional" || modeSelection === "startFrameOptional") return { min: 1, max: 2 };
+    if (modeSelection === "singleImage") return { min: 1, max: 1 };
+    if (Array.isArray(modeSelection)) {
+      const imageLimit = modeSelection
+        .filter((item) => typeof item === "string" && item.startsWith("imageReference:"))
+        .map((item) => Number(String(item).split(":")[1]))
+        .filter((value) => Number.isFinite(value));
+      if (imageLimit.length > 0) {
+        const min = Number(getModelMeta(model).multiReferenceMinCount ?? 1);
+        return { min, max: Math.max(...imageLimit) };
+      }
+    }
+    if (modeSelection === "text") return { min: 0, max: 0 };
+  }
+
   if (metaLimits && (metaLimits.min > 0 || metaLimits.max > 0 || !hasImageReferenceMode(model))) {
     return metaLimits;
   }
@@ -467,12 +492,12 @@ const ensureImageDataUrl = async (value: string) => {
   return `data:image/png;base64,${value}`;
 };
 
-const normalizeImageReferences = async (referenceList: { base64: string }[] | undefined, model: any) => {
+const normalizeImageReferences = async (referenceList: { base64: string }[] | undefined, model: any, activeMode?: VideoConfig["mode"] | string) => {
   const imageRefs = (await Promise.all((referenceList ?? []).map(async (item) => await ensureImageDataUrl(item.base64)))).filter(Boolean);
   if (imageRefs.length > 0 && !allowsInputType(model, "image_url")) {
     throw new Error(`模型 ${model.modelName} 不支持参考图输入`);
   }
-  const limits = getReferenceLimits(model);
+  const limits = getReferenceLimits(model, activeMode);
   if (imageRefs.length < limits.min) {
     throw new Error(`模型 ${model.modelName} 至少需要 ${limits.min} 张参考图`);
   }
@@ -524,7 +549,8 @@ const textRequest = (model: TextModel, think: boolean, thinkLevel: 0 | 1 | 2 | 3
 const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<string> => {
   const meta = getModelMeta(model);
   const prompt = (config.prompt || "").trim();
-  const imageRefs = await normalizeImageReferences(config.referenceList, meta);
+  const imageMode = config.mode ?? (config.referenceList?.length ? "singleImage" : "text");
+  const imageRefs = await normalizeImageReferences(config.referenceList, meta, imageMode);
 
   if (prompt && !allowsInputType(meta, "text")) {
     throw new Error(`模型 ${model.modelName} 不支持文本输入`);
@@ -562,7 +588,7 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
   if (nonImageRefs.length > 0) {
     throw new Error(`模型 ${model.modelName} 当前仅支持图片参考输入`);
   }
-  const imageRefs = await normalizeImageReferences((config.referenceList ?? []).filter((item) => item.type === "image") as any, meta);
+  const imageRefs = await normalizeImageReferences((config.referenceList ?? []).filter((item) => item.type === "image") as any, meta, config.mode);
 
   if ((meta.supportedDurations ?? []).length > 0 && !meta.supportedDurations.includes(config.duration)) {
     throw new Error(`模型 ${model.modelName} 不支持时长 ${config.duration}`);
@@ -589,7 +615,7 @@ const ttsRequest = async (config: TTSConfig, model: TTSModel): Promise<string> =
 };
 
 const checkForUpdates = async (): Promise<{ hasUpdate: boolean; latestVersion: string; notice: string }> => {
-  return { hasUpdate: false, latestVersion: "2.4", notice: "" };
+  return { hasUpdate: false, latestVersion: "2.5", notice: "" };
 };
 
 const updateVendor = async (): Promise<string> => {

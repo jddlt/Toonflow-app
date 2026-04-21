@@ -146,7 +146,7 @@ export default async (knex: Knex): Promise<void> => {
     u.vendor.writeCode("minimax", vendorData["minimax.ts"]);
   }
   const uniMediaVer = await u.vendor.getVendor("uni-media").version;
-  if (Number(uniMediaVer) < 2.4) {
+  if (Number(uniMediaVer) < 2.5) {
     u.vendor.writeCode("uni-media", vendorData["uni-media.ts"]);
     const uniMediaConfig = await u.db("o_vendorConfig").where("id", "uni-media").first("models");
     const staleBuiltInModels = new Set([
@@ -167,8 +167,7 @@ export default async (knex: Knex): Promise<void> => {
     ]);
     const nextModels = parseStoredVendorModels(uniMediaConfig?.models).filter((model) => {
       if (model.deleted) return true;
-      if (!staleBuiltInModels.has(model.modelName)) return true;
-      return ["supportedResolutions", "allowedInputTypes", "referenceImageLimits", "supportedDurations"].some((key) => key in model);
+      return !staleBuiltInModels.has(model.modelName);
     });
     await u
       .db("o_vendorConfig")
